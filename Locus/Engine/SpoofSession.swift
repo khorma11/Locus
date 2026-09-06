@@ -37,6 +37,10 @@ enum TravelMode: String, CaseIterable, Identifiable {
         }
     }
 
+    var routeSpeedKPH: Double {
+        (baseSpeed * 3.6).rounded()
+    }
+
     var mkTransportType: MKDirectionsTransportType {
         switch self {
         case .walk, .run: return .walking
@@ -73,7 +77,17 @@ final class SpoofSession: ObservableObject {
     @Published var status: SpoofStatus = .idle
     @Published var pin: CLLocationCoordinate2D?
     @Published var simulated: CLLocationCoordinate2D?
-    @Published var travelMode: TravelMode = .walk
+    @Published var travelMode: TravelMode = .walk {
+        didSet {
+            guard travelMode != oldValue else { return }
+            routeSpeedKPH = travelMode.routeSpeedKPH
+        }
+    }
+    @Published var routeSpeedKPH: Double = TravelMode.walk.routeSpeedKPH {
+        didSet {
+            UserDefaults.standard.set(routeSpeedKPH, forKey: routeSpeedKey)
+        }
+    }
     @Published var mapStyleIndex: Int = 0
     @Published var lastError: String?
     @Published var isBusy = false
@@ -91,10 +105,15 @@ final class SpoofSession: ObservableObject {
 
     private let favoritesKey = "locus.favorites"
     private let recentsKey = "locus.recents"
+    private let routeSpeedKey = "locus.routeSpeedKPH"
 
     init() {
         favorites = SavedPlace.load(key: favoritesKey)
         recents = SavedPlace.load(key: recentsKey)
+        let savedSpeed = UserDefaults.standard.double(forKey: routeSpeedKey)
+        if savedSpeed >= 3, savedSpeed <= 160 {
+            routeSpeedKPH = savedSpeed
+        }
     }
 
     var isSpoofing: Bool {
@@ -182,7 +201,6 @@ final class SpoofSession: ObservableObject {
         guard pairing.hasPairingFile, coordinates.count >= 2 else { return }
         routeTask?.cancel()
         stopJoystick()
-        let mode = travelMode
         routeTask = Task { [weak self] in
             guard let self else { return }
             var path = coordinates
@@ -195,8 +213,8 @@ final class SpoofSession: ObservableObject {
                     if Task.isCancelled { break }
                     let distance = CLLocation(latitude: previous.latitude, longitude: previous.longitude)
                         .distance(from: CLLocation(latitude: next.latitude, longitude: next.longitude))
-                    var speed = mode.baseSpeed * Double.random(in: 0.88...1.12)
-                    speed = max(0.8, speed)
+                    let selectedSpeed = self.routeSpeedKPH / 3.6
+                    let speed = max(0.8, selectedSpeed * Double.random(in: 0.88...1.12))
                     let stepMeters: CLLocationDistance = min(12, max(4, speed * 0.5))
                     let steps = max(1, Int(ceil(distance / stepMeters)))
                     for i in 1...steps {
@@ -206,7 +224,7 @@ final class SpoofSession: ObservableObject {
                             latitude: previous.latitude + (next.latitude - previous.latitude) * t,
                             longitude: previous.longitude + (next.longitude - previous.longitude) * t
                         )
-                        let delay = stepMeters / speed
+                        let delay = (distance / Double(steps)) / speed
                         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                         await MainActor.run {
                             self.apply(coord, pairing: pairing, markRecent: false)
