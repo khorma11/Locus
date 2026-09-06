@@ -10,16 +10,76 @@ struct RoutePlannerSheet: View {
     var onImportGPX: () -> Void
     var onExportGPX: () -> Void
     var onUseDrawn: () -> Void
+    var onGPXRoute: (GPXRouteFile, GPXRouteAction) -> Void
 
     @EnvironmentObject private var session: SpoofSession
     @Environment(\.dismiss) private var dismiss
     @State private var savedRoutes = SavedRoute.load()
     @State private var routeName = ""
     @State private var isNamingRoute = false
+    @State private var gpxRoutes: [GPXRouteFile] = []
+    @State private var routePendingDeletion: GPXRouteFile?
 
     var body: some View {
         NavigationStack {
             List {
+                Section("GPX Route Library") {
+                    if gpxRoutes.isEmpty {
+                        ContentUnavailableView(
+                            "No GPX Routes",
+                            systemImage: "map",
+                            description: Text("Import a GPX file to keep it in this library.")
+                        )
+                    } else {
+                        ForEach(gpxRoutes) { route in
+                            VStack(alignment: .leading, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(route.name)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(route.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                HStack(spacing: 16) {
+                                    routeButton("Preview", icon: "eye") {
+                                        onGPXRoute(route, .preview)
+                                    }
+                                    routeButton("Start", icon: "play.fill") {
+                                        onGPXRoute(route, .start)
+                                    }
+                                    Menu {
+                                        Button {
+                                            onGPXRoute(route, .reverse)
+                                        } label: {
+                                            Label("Start Reverse", systemImage: "arrow.uturn.backward")
+                                        }
+                                        Button {
+                                            onGPXRoute(route, .loop)
+                                        } label: {
+                                            Label("Loop Continuously", systemImage: "repeat")
+                                        }
+                                        Divider()
+                                        Button(role: .destructive) {
+                                            routePendingDeletion = route
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    } label: {
+                                        Label("More", systemImage: "ellipsis.circle")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+
+                    Button(action: onImportGPX) {
+                        Label("Import GPX", systemImage: "square.and.arrow.down")
+                    }
+                }
+
                 Section("Saved routes") {
                     ForEach(savedRoutes) { route in
                         Button {
@@ -82,9 +142,6 @@ struct RoutePlannerSheet: View {
                     Button(action: onPlay) {
                         Label("Follow route", systemImage: "play.fill")
                     }
-                    Button(action: onImportGPX) {
-                        Label("Import GPX", systemImage: "square.and.arrow.down")
-                    }
                     Button(action: onExportGPX) {
                         Label("Export GPX", systemImage: "square.and.arrow.up")
                     }
@@ -97,12 +154,30 @@ struct RoutePlannerSheet: View {
                 }
             }
             .navigationTitle("Routes")
+            .onAppear { reloadGPXRoutes() }
             .alert("Save Route", isPresented: $isNamingRoute) {
                 TextField("Route name", text: $routeName)
                 Button("Cancel", role: .cancel) {}
                 Button("Save") { saveCurrentRoute() }
             } message: {
                 Text("This route will remain available in Locus.")
+            }
+            .confirmationDialog(
+                "Delete \(routePendingDeletion?.name ?? "route")?",
+                isPresented: Binding(
+                    get: { routePendingDeletion != nil },
+                    set: { if !$0 { routePendingDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete GPX", role: .destructive) {
+                    deletePendingRoute()
+                }
+                Button("Cancel", role: .cancel) {
+                    routePendingDeletion = nil
+                }
+            } message: {
+                Text("This removes the file from Locus Documents.")
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -115,6 +190,30 @@ struct RoutePlannerSheet: View {
     private func coordText(_ c: CLLocationCoordinate2D?) -> String {
         guard let c else { return "—" }
         return String(format: "%.5f, %.5f", c.latitude, c.longitude)
+    }
+
+    private func routeButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func reloadGPXRoutes() {
+        gpxRoutes = GPXRouteFile.loadAll()
+    }
+
+    private func deletePendingRoute() {
+        guard let route = routePendingDeletion else { return }
+        do {
+            try route.delete()
+            routePendingDeletion = nil
+            reloadGPXRoutes()
+        } catch {
+            routePendingDeletion = nil
+            session.lastError = error.localizedDescription
+        }
     }
 
     private func saveCurrentRoute() {

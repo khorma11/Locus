@@ -150,7 +150,8 @@ struct MapHomeView: View {
                     routeCoords = RouteBuilder.sample(coordinates: drawnPath, every: 10)
                     drawnPath.removeAll()
                     drawMode = false
-                }
+                },
+                onGPXRoute: handleGPXRoute
             )
             .presentationDetents([.medium, .large])
         }
@@ -395,7 +396,8 @@ struct MapHomeView: View {
 
     private func importGPX(_ url: URL) {
         do {
-            let coords = try GPXCodec.parse(url)
+            let storedURL = try GPXRouteFile.importFile(from: url)
+            let coords = try GPXCodec.parse(storedURL)
             routeCoords = RouteBuilder.sample(coordinates: coords, every: 10)
             if let first = coords.first {
                 session.pin = first
@@ -404,6 +406,50 @@ struct MapHomeView: View {
         } catch {
             session.lastError = error.localizedDescription
         }
+    }
+
+    private func handleGPXRoute(_ route: GPXRouteFile, action: GPXRouteAction) {
+        do {
+            var coordinates = try GPXCodec.parse(route.url)
+            if action == .reverse {
+                coordinates.reverse()
+            }
+            let path = RouteBuilder.sample(coordinates: coordinates, every: 10)
+            guard path.count >= 2 else {
+                session.lastError = "This GPX route needs at least two track points."
+                return
+            }
+            routeCoords = path
+            session.pin = path[0]
+            showRouteSheet = false
+
+            if action == .preview {
+                position = .region(previewRegion(for: path))
+            } else {
+                session.followRoute(path, pairing: pairing, loop: action == .loop)
+            }
+        } catch {
+            session.lastError = error.localizedDescription
+        }
+    }
+
+    private func previewRegion(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
+        let latitudes = coordinates.map(\.latitude)
+        let longitudes = coordinates.map(\.longitude)
+        let minLatitude = latitudes.min() ?? 0
+        let maxLatitude = latitudes.max() ?? 0
+        let minLongitude = longitudes.min() ?? 0
+        let maxLongitude = longitudes.max() ?? 0
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: (minLatitude + maxLatitude) / 2,
+                longitude: (minLongitude + maxLongitude) / 2
+            ),
+            span: MKCoordinateSpan(
+                latitudeDelta: max(0.002, (maxLatitude - minLatitude) * 1.25),
+                longitudeDelta: max(0.002, (maxLongitude - minLongitude) * 1.25)
+            )
+        )
     }
 
     private func exportGPX() {

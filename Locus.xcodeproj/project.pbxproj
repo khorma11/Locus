@@ -23,6 +23,7 @@
 		87B0D41458D6AF0D39C9AAA4 /* RoutePlannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76779E56819A74B78236EF1 /* RoutePlannerSheet.swift */; };
 		8EAFB147F0F0E2AAE207D276 /* RouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FC0C702516F159A7EF6D853 /* RouteBuilder.swift */; };
 		976D8B4B49C6B6588EA59B2F /* LocusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03DE64DA7097F210F1075553 /* LocusApp.swift */; };
+		A9E0B3BA3B93CE23FAE191A5 /* GPXRouteFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD14D1561C5D3DC5653AADD /* GPXRouteFile.swift */; };
 		AB35A419877FF9CA0B4AB114 /* JoystickPad.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF6D1EA6EBAAF543339FF81 /* JoystickPad.swift */; };
 		AC1BBA0F82E89EB56800992E /* PairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7977CA785FF0B09F4F88DE7D /* PairingStore.swift */; };
 		B10A777C5622EE884A890643 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1AF0F32E88B4227CA45694 /* RootView.swift */; };
@@ -45,6 +46,7 @@
 		361C48381EA09BB299BD110E /* LocusEasterEggView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocusEasterEggView.swift; sourceTree = "<group>"; };
 		377FB9983B927B5898D09160 /* LocationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationEngine.swift; sourceTree = "<group>"; };
 		3B51D4F370EFC220A54A082F /* Locus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Locus.entitlements; sourceTree = "<group>"; };
+		3BD14D1561C5D3DC5653AADD /* GPXRouteFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPXRouteFile.swift; sourceTree = "<group>"; };
 		429366C3732ACF4031A7006B /* SetupFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupFlowView.swift; sourceTree = "<group>"; };
 		5415BEF759B8C8AF04096B3E /* BackgroundKeepAlive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundKeepAlive.swift; sourceTree = "<group>"; };
 		6DF917A85B507FDDCF382E2F /* SilentAudioKeepAlive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilentAudioKeepAlive.swift; sourceTree = "<group>"; };
@@ -179,6 +181,7 @@
 		B67E43CBD395C80F3D3345CB /* Support */ = {
 			isa = PBXGroup;
 			children = (
+				3BD14D1561C5D3DC5653AADD /* GPXRouteFile.swift */,
 				BFAD463F53BD704A35A8E65F /* LocalDevVPN.swift */,
 				2E6BE765DFC4FB848609C8AA /* PairingDocumentPicker.swift */,
 				799094E9B1F051BEAD82D2C1 /* SavedPlace.swift */,
@@ -291,6 +294,7 @@
 			files = (
 				C5B176B29163E524B776757A /* BackgroundKeepAlive.swift in Sources */,
 				4A19A245C3B57EB4E5B02CDE /* DeviceTunnel.swift in Sources */,
+				A9E0B3BA3B93CE23FAE191A5 /* GPXRouteFile.swift in Sources */,
 				AB35A419877FF9CA0B4AB114 /* JoystickPad.swift in Sources */,
 				824D08C2AC8FD477F58DE51F /* LocalDevVPN.swift in Sources */,
 				DA2B8023B167C95C2A034C47 /* LocationEngine.swift in Sources */,
