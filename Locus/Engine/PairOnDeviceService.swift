@@ -26,7 +26,6 @@ final class PairOnDeviceService: ObservableObject {
 
     private var worker: Thread?
     private let callbackBox = PairCallbackBox()
-    private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private let keepAlive = PairingKeepAlive()
     private let audioKeepAlive = SilentAudioKeepAlive()
     private let advertiser = PairableHostAdvertiser()
@@ -145,19 +144,12 @@ final class PairOnDeviceService: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         keepAlive.start()
         audioKeepAlive.start()
-        guard backgroundTask == .invalid else { return }
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "locus.pairable-host") { [weak self] in
-            self?.endKeepAlive()
-        }
     }
 
     private func endKeepAlive() {
         UIApplication.shared.isIdleTimerDisabled = false
         keepAlive.stop()
         audioKeepAlive.stop()
-        guard backgroundTask != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(backgroundTask)
-        backgroundTask = .invalid
     }
 
     private func requestNotificationPermission() {
@@ -185,7 +177,7 @@ final class PairOnDeviceService: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-    private static func runBlockingAccept(outputPath: String, box: PairCallbackBox) {
+    nonisolated private static func runBlockingAccept(outputPath: String, box: PairCallbackBox) {
         let name = "Locus"
         let model = "Mac17,7"
 

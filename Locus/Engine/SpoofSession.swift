@@ -86,7 +86,6 @@ final class SpoofSession: ObservableObject {
     private var healthTimer: Timer?
     private var joystickTimer: Timer?
     private var routeTask: Task<Void, Never>?
-    private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var joystickVector: CGVector = .zero
     private let locationKeeper = BackgroundKeepAlive()
 
@@ -126,7 +125,6 @@ final class SpoofSession: ObservableObject {
         case .success:
             simulated = nil
             status = .idle
-            endBackground()
             // Keep location updates running so the map puck / locate button
             // can return to the real GPS fix (not the leftover pin).
             locationKeeper.start()
@@ -305,7 +303,6 @@ final class SpoofSession: ObservableObject {
             pin = coordinate
             status = .active
             lastError = nil
-            beginBackground()
             locationKeeper.start()
             startResend(pairing: pairing)
             startHealth(pairing: pairing)
@@ -397,19 +394,6 @@ final class SpoofSession: ObservableObject {
         recents.insert(place, at: 0)
         if recents.count > 20 { recents = Array(recents.prefix(20)) }
         SavedPlace.save(recents, key: recentsKey)
-    }
-
-    private func beginBackground() {
-        guard backgroundTask == .invalid else { return }
-        backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
-            self?.endBackground()
-        }
-    }
-
-    private func endBackground() {
-        guard backgroundTask != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(backgroundTask)
-        backgroundTask = .invalid
     }
 
     private func postDropNotification(_ message: String) {
