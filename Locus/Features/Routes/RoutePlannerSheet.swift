@@ -23,6 +23,40 @@ struct RoutePlannerSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Movement Speed") {
+                    HStack {
+                        Label("Route speed", systemImage: "speedometer")
+                        Spacer()
+                        Text("\(Int(session.routeSpeedKPH.rounded())) km/h")
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(LocusTheme.accent)
+                    }
+
+                    Slider(value: $session.routeSpeedKPH, in: 3...160, step: 1) {
+                        Text("Route speed")
+                    } minimumValueLabel: {
+                        Text("3")
+                            .font(.caption2)
+                    } maximumValueLabel: {
+                        Text("160")
+                            .font(.caption2)
+                    }
+
+                    HStack {
+                        ForEach([5.0, 15.0, 40.0, 80.0, 120.0], id: \.self) { speed in
+                            Button("\(Int(speed))") {
+                                session.routeSpeedKPH = speed
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    Text("Speed can be changed while a route is moving. Selecting Walk, Run, Cycle, or Drive resets it to that mode's normal speed.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("GPX Route Library") {
                     if gpxRoutes.isEmpty {
                         ContentUnavailableView(
@@ -148,7 +182,7 @@ struct RoutePlannerSheet: View {
                 }
 
                 Section {
-                    Text("Routes follow Apple Maps roads/footpaths for the selected travel mode. Speed gets light random variation so motion looks less robotic.")
+                    Text("Routes follow Apple Maps roads/footpaths for the selected travel mode. The selected speed gets light random variation so motion looks less robotic.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
