@@ -244,6 +244,7 @@ struct PlacesView: View {
                 Text("Choose a name you’ll recognize later.")
             }
         }
+        .sessionErrorAlert()
     }
 
     private func placeButton(_ place: SavedPlace) -> some View {

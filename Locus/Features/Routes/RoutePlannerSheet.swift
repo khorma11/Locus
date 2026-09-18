@@ -219,6 +219,7 @@ struct RoutePlannerSheet: View {
                 }
             }
         }
+        .sessionErrorAlert()
     }
 
     private func coordText(_ c: CLLocationCoordinate2D?) -> String {

@@ -100,6 +100,9 @@ final class SpoofSession: ObservableObject {
     private var healthTimer: Timer?
     private var joystickTimer: Timer?
     private var routeTask: Task<Void, Never>?
+    /// True while a coordinate is being pushed. Timer-driven pushes (joystick ticks,
+    /// keep-alive resends) skip their turn instead of piling up behind a slow tunnel.
+    private var applyInFlight = false
     private var joystickVector: CGVector = .zero
     private let locationKeeper = BackgroundKeepAlive()
 
@@ -128,7 +131,7 @@ final class SpoofSession: ObservableObject {
             return
         }
         pin = coordinate
-        apply(coordinate, pairing: pairing, markRecent: true)
+        Task { await apply(coordinate, pairing: pairing, markRecent: true) }
     }
 
     func stop(pairing: PairingStore) {
@@ -138,19 +141,21 @@ final class SpoofSession: ObservableObject {
         stopResend()
         stopHealth()
         isBusy = true
-        let result = LocationEngine.clear()
-        isBusy = false
-        switch result {
-        case .success:
-            simulated = nil
-            status = .idle
-            // Keep location updates running so the map puck / locate button
-            // can return to the real GPS fix (not the leftover pin).
-            locationKeeper.start()
-        case .failure(let error):
-            lastError = error.localizedDescription
-            status = .dropped(error.localizedDescription)
-            postDropNotification(error.localizedDescription)
+        Task {
+            let result = await Self.engineClear()
+            isBusy = false
+            switch result {
+            case .success:
+                simulated = nil
+                status = .idle
+                // Keep location updates running so the map puck / locate button
+                // can return to the real GPS fix (not the leftover pin).
+                locationKeeper.start()
+            case .failure(let error):
+                lastError = error.localizedDescription
+                status = .dropped(error.localizedDescription)
+                postDropNotification(error.localizedDescription)
+            }
         }
     }
 
@@ -175,7 +180,7 @@ final class SpoofSession: ObservableObject {
             return
         }
         if simulated == nil {
-            apply(start, pairing: pairing, markRecent: false)
+            Task { await apply(start, pairing: pairing, markRecent: false) }
         }
         joystickActive = true
         joystickTimer?.invalidate()
@@ -198,7 +203,16 @@ final class SpoofSession: ObservableObject {
     }
 
     func followRoute(_ coordinates: [CLLocationCoordinate2D], pairing: PairingStore, loop: Bool = false) {
-        guard pairing.hasPairingFile, coordinates.count >= 2 else { return }
+        // These used to be one silent `return`, so a route that could not start looked
+        // like a dead button.
+        guard pairing.hasPairingFile else {
+            lastError = "Import an RPPairing file in Settings first."
+            return
+        }
+        guard coordinates.count >= 2 else {
+            lastError = "This route needs at least two points."
+            return
+        }
         routeTask?.cancel()
         stopJoystick()
         routeTask = Task { [weak self] in
@@ -206,9 +220,9 @@ final class SpoofSession: ObservableObject {
             var path = coordinates
             repeat {
                 var previous = path[0]
-                await MainActor.run {
-                    self.apply(previous, pairing: pairing, markRecent: true)
-                }
+                // Stop rather than hammer a tunnel that just refused the first point;
+                // the failure is already on screen as an alert.
+                guard await self.apply(previous, pairing: pairing, markRecent: true) else { return }
                 for next in path.dropFirst() {
                     if Task.isCancelled { break }
                     let distance = CLLocation(latitude: previous.latitude, longitude: previous.longitude)
@@ -226,9 +240,7 @@ final class SpoofSession: ObservableObject {
                         )
                         let delay = (distance / Double(steps)) / speed
                         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                        await MainActor.run {
-                            self.apply(coord, pairing: pairing, markRecent: false)
-                        }
+                        await self.apply(coord, pairing: pairing, markRecent: false)
                     }
                     previous = next
                 }
@@ -309,17 +321,22 @@ final class SpoofSession: ObservableObject {
         return false
     }
 
-    private func apply(_ coordinate: CLLocationCoordinate2D, pairing: PairingStore, markRecent: Bool) {
+    /// Push a coordinate into locationd. Returns false if the session could not be set.
+    ///
+    /// The idevice calls underneath block on socket I/O: opening the developer tunnel
+    /// waits on a TCP connect to the tunnel IP, which stalls for the full connect
+    /// timeout whenever LocalDevVPN is not connected. Run on the main actor that froze
+    /// the whole UI with no feedback, so the work is handed to a background task and
+    /// only the result is applied here.
+    @discardableResult
+    private func apply(_ coordinate: CLLocationCoordinate2D, pairing: PairingStore, markRecent: Bool) async -> Bool {
         if status == .idle || status.isDropped {
             status = .connecting
         }
         isBusy = true
-        let result = LocationEngine.set(
-            latitude: coordinate.latitude,
-            longitude: coordinate.longitude,
-            pairingPath: pairing.pairingPath,
-            deviceIP: TunnelConfig.targetIP
-        )
+        applyInFlight = true
+        let result = await Self.engineSet(coordinate, pairingPath: pairing.pairingPath)
+        applyInFlight = false
         isBusy = false
         switch result {
         case .success:
@@ -333,6 +350,7 @@ final class SpoofSession: ObservableObject {
             if markRecent {
                 pushRecent(coordinate)
             }
+            return true
         case .failure(let error):
             lastError = error.localizedDescription
             if simulated != nil {
@@ -341,11 +359,43 @@ final class SpoofSession: ObservableObject {
             } else {
                 status = .idle
             }
+            return false
+        }
+    }
+
+    /// Runs the blocking idevice call off the main actor.
+    private static func engineSet(
+        _ coordinate: CLLocationCoordinate2D,
+        pairingPath: String
+    ) async -> Result<Void, LocationEngineError> {
+        let latitude = coordinate.latitude
+        let longitude = coordinate.longitude
+        let deviceIP = TunnelConfig.targetIP
+        // A plain Task would park a cooperative-pool thread for the whole connect
+        // timeout, so the blocking call goes to a Dispatch queue instead.
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: LocationEngine.set(
+                    latitude: latitude,
+                    longitude: longitude,
+                    pairingPath: pairingPath,
+                    deviceIP: deviceIP
+                ))
+            }
+        }
+    }
+
+    /// Runs the blocking teardown off the main actor, same reasoning as `engineSet`.
+    private static func engineClear() async -> Result<Void, LocationEngineError> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: LocationEngine.clear())
+            }
         }
     }
 
     private func tickJoystick(pairing: PairingStore) {
-        guard joystickActive, let current = simulated else { return }
+        guard joystickActive, let current = simulated, !applyInFlight else { return }
         let magnitude = hypot(joystickVector.dx, joystickVector.dy)
         guard magnitude > 0.08 else { return }
         let nx = joystickVector.dx / magnitude
@@ -354,20 +404,15 @@ final class SpoofSession: ObservableObject {
         let dt = 0.25
         let meters = speed * dt
         let next = offset(coordinate: current, eastMeters: nx * meters, northMeters: ny * meters)
-        apply(next, pairing: pairing, markRecent: false)
+        Task { await apply(next, pairing: pairing, markRecent: false) }
     }
 
     private func startResend(pairing: PairingStore) {
         resendTimer?.invalidate()
         resendTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let sim = self.simulated else { return }
-                _ = LocationEngine.set(
-                    latitude: sim.latitude,
-                    longitude: sim.longitude,
-                    pairingPath: pairing.pairingPath,
-                    deviceIP: TunnelConfig.targetIP
-                )
+                guard let self, let sim = self.simulated, !self.applyInFlight else { return }
+                _ = await Self.engineSet(sim, pairingPath: pairing.pairingPath)
             }
         }
     }
@@ -382,12 +427,13 @@ final class SpoofSession: ObservableObject {
         healthTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let sim = self.simulated else { return }
+                guard !self.applyInFlight else { return }
                 if case .dropped = self.status {
                     self.status = .reconnecting
-                    self.apply(sim, pairing: pairing, markRecent: false)
+                    await self.apply(sim, pairing: pairing, markRecent: false)
                 } else if !LocationEngine.isSessionActive, self.isSpoofing {
                     self.status = .reconnecting
-                    self.apply(sim, pairing: pairing, markRecent: false)
+                    await self.apply(sim, pairing: pairing, markRecent: false)
                 }
             }
         }
