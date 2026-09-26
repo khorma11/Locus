@@ -4,9 +4,14 @@ import SwiftUI
 struct RoutePlannerSheet: View {
     @Binding var start: CLLocationCoordinate2D?
     @Binding var end: CLLocationCoordinate2D?
+    @Binding var routeOptions: [RoadRouteOption]
+    @Binding var selectedRouteID: RoadRouteOption.ID?
     @Binding var isRouting: Bool
     var onBuild: () -> Void
+    var onSelectRoute: (RoadRouteOption) -> Void
     var onPlay: () -> Void
+    var onPickStart: () -> Void
+    var onPickEnd: () -> Void
     var onImportGPX: () -> Void
     var onExportGPX: () -> Void
     var onUseDrawn: () -> Void
@@ -119,6 +124,8 @@ struct RoutePlannerSheet: View {
                         Button {
                             start = route.start ?? session.simulated ?? session.pin
                             end = route.end
+                            routeOptions.removeAll()
+                            selectedRouteID = nil
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(route.name)
@@ -143,11 +150,35 @@ struct RoutePlannerSheet: View {
                 }
 
                 Section("Road route") {
+                    HStack(spacing: 10) {
+                        Button {
+                            onPickStart()
+                        } label: {
+                            Label("Pick Start", systemImage: "smallcircle.filled.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+
+                        Button {
+                            onPickEnd()
+                        } label: {
+                            Label("Pick End", systemImage: "mappin.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    }
+
                     Button("Use current pin / spoof as start") {
                         start = session.simulated ?? session.pin
+                        routeOptions.removeAll()
+                        selectedRouteID = nil
                     }
                     Button("Use current pin as end") {
                         end = session.pin
+                        routeOptions.removeAll()
+                        selectedRouteID = nil
                     }
                     LabeledContent("Start") {
                         Text(coordText(start)).font(.caption.monospaced())
@@ -161,10 +192,41 @@ struct RoutePlannerSheet: View {
                         if isRouting {
                             ProgressView()
                         } else {
-                            Label("Build walk/drive route on roads", systemImage: "road.lanes")
+                            Label("Build route", systemImage: "road.lanes")
                         }
                     }
                     .disabled(isRouting)
+                }
+
+                if !routeOptions.isEmpty {
+                    Section("Route options") {
+                        ForEach(routeOptions) { option in
+                            Button {
+                                onSelectRoute(option)
+                            } label: {
+                                HStack(alignment: .center, spacing: 12) {
+                                    Image(systemName: selectedRouteID == option.id ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedRouteID == option.id ? LocusTheme.accent : .secondary)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(option.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Text("\(option.durationText) · \(option.distanceText)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Label("Preview", systemImage: "eye")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(LocusTheme.accent)
+                                        .labelStyle(.iconOnly)
+                                        .accessibilityLabel("Preview route")
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
 
                 Section("Play / draw / GPX") {
@@ -182,7 +244,7 @@ struct RoutePlannerSheet: View {
                 }
 
                 Section {
-                    Text("Routes follow Apple Maps roads/footpaths for the selected travel mode. The selected speed gets light random variation so motion looks less robotic.")
+                    Text("Locus tries Apple Maps roads/footpaths first. If no road route is found, it creates a direct route between the pins. Import GPX for exact roads.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

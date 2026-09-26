@@ -2,24 +2,99 @@ import CoreLocation
 import Foundation
 import MapKit
 
+struct RoadRouteOption: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let coordinates: [CLLocationCoordinate2D]
+    let distanceMeters: CLLocationDistance
+    let expectedTravelTime: TimeInterval
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        coordinates: [CLLocationCoordinate2D],
+        distanceMeters: CLLocationDistance,
+        expectedTravelTime: TimeInterval
+    ) {
+        self.id = id
+        self.name = name
+        self.coordinates = coordinates
+        self.distanceMeters = distanceMeters
+        self.expectedTravelTime = expectedTravelTime
+    }
+
+    static func == (lhs: RoadRouteOption, rhs: RoadRouteOption) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    var distanceText: String {
+        if distanceMeters >= 1000 {
+            return String(format: "%.1f km", distanceMeters / 1000)
+        }
+        return "\(Int(distanceMeters.rounded())) m"
+    }
+
+    var durationText: String {
+        let minutes = max(1, Int((expectedTravelTime / 60).rounded()))
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let remainder = minutes % 60
+            return remainder == 0 ? "\(hours) hr" : "\(hours) hr \(remainder) min"
+        }
+        return "\(minutes) min"
+    }
+}
+
 enum RouteBuilder {
+    static func directRouteOption(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        mode: TravelMode
+    ) -> RoadRouteOption {
+        let distance = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
+        let speed = max(0.8, mode.baseSpeed)
+        return RoadRouteOption(
+            name: "Direct route",
+            coordinates: sample(coordinates: [start, end], every: 12),
+            distanceMeters: distance,
+            expectedTravelTime: distance / speed
+        )
+    }
+
+    static func roadRouteOptions(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D,
+        mode: TravelMode
+    ) async throws -> [RoadRouteOption] {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
+        request.transportType = mode.mkTransportType
+        request.requestsAlternateRoutes = true
+
+        let directions = MKDirections(request: request)
+        let response = try await directions.calculate()
+        let options = response.routes.enumerated().map { index, route in
+            RoadRouteOption(
+                name: route.name.isEmpty ? "Route \(index + 1)" : route.name,
+                coordinates: sample(polyline: route.polyline, every: 12),
+                distanceMeters: route.distance,
+                expectedTravelTime: route.expectedTravelTime
+            )
+        }
+        guard !options.isEmpty else {
+            throw NSError(domain: "Locus", code: 1, userInfo: [NSLocalizedDescriptionKey: "No route found"])
+        }
+        return options
+    }
+
     static func roadRoute(
         from start: CLLocationCoordinate2D,
         to end: CLLocationCoordinate2D,
         mode: TravelMode
     ) async throws -> [CLLocationCoordinate2D] {
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
-        request.transportType = mode.mkTransportType
-        request.requestsAlternateRoutes = false
-
-        let directions = MKDirections(request: request)
-        let response = try await directions.calculate()
-        guard let route = response.routes.first else {
-            throw NSError(domain: "Locus", code: 1, userInfo: [NSLocalizedDescriptionKey: "No route found"])
-        }
-        return sample(polyline: route.polyline, every: 12)
+        try await roadRouteOptions(from: start, to: end, mode: mode).first?.coordinates ?? []
     }
 
     static func sample(polyline: MKPolyline, every meters: CLLocationDistance) -> [CLLocationCoordinate2D] {

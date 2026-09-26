@@ -8,9 +8,14 @@ DERIVED_DATA="${TMPDIR:-/tmp}/Locus-refresh"
 
 cd "$(dirname "$0")"
 xcodegen generate
-xcodebuild -project Locus.xcodeproj -scheme Locus -configuration Debug \
-  -destination "platform=iOS,name=$DEVICE_NAME" -derivedDataPath "$DERIVED_DATA" \
-  -allowProvisioningUpdates DEVELOPMENT_TEAM=$TEAM build
+# First build can fail while automatic signing creates/fetches the provisioning
+# profile; a second pass succeeds once it exists. Retry once before giving up.
+build() {
+  xcodebuild -project Locus.xcodeproj -scheme Locus -configuration Debug \
+    -destination "platform=iOS,name=$DEVICE_NAME" -derivedDataPath "$DERIVED_DATA" \
+    -allowProvisioningUpdates DEVELOPMENT_TEAM=$TEAM build
+}
+build || { echo "First build failed; retrying after provisioning update..."; build; }
 APP="$DERIVED_DATA/Build/Products/Debug-iphoneos/Locus.app"
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
 xcrun devicectl device install app --device "$DEVICE_NAME" "$APP"

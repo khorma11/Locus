@@ -12,12 +12,15 @@ struct MapHomeView: View {
     @FocusState private var searchFocused: Bool
     @State private var routeStart: CLLocationCoordinate2D?
     @State private var routeEnd: CLLocationCoordinate2D?
+    @State private var routeOptions: [RoadRouteOption] = []
+    @State private var selectedRouteID: RoadRouteOption.ID?
     @State private var routeCoords: [CLLocationCoordinate2D] = []
     @State private var isRouting = false
     @State private var showRouteSheet = false
     @State private var showGPXImporter = false
     @State private var drawnPath: [CLLocationCoordinate2D] = []
     @State private var drawMode = false
+    @State private var routePinTarget: RoutePinTarget?
     @State private var pinSelected = false
     @State private var isDraggingPin = false
     @State private var suppressNextMapTap = false
@@ -95,6 +98,14 @@ struct MapHomeView: View {
                             }
                         }
                     }
+                    if let routeStart {
+                        Marker("Start", systemImage: "smallcircle.filled.circle", coordinate: routeStart)
+                            .tint(.green)
+                    }
+                    if let routeEnd {
+                        Marker("End", systemImage: "mappin.circle.fill", coordinate: routeEnd)
+                            .tint(.red)
+                    }
                     if routeCoords.count > 1 {
                         MapPolyline(coordinates: routeCoords)
                             .stroke(LocusTheme.accent, lineWidth: 5)
@@ -136,9 +147,20 @@ struct MapHomeView: View {
             RoutePlannerSheet(
                 start: $routeStart,
                 end: $routeEnd,
+                routeOptions: $routeOptions,
+                selectedRouteID: $selectedRouteID,
                 isRouting: $isRouting,
                 onBuild: buildRoadRoute,
+                onSelectRoute: selectRoute,
                 onPlay: playRoute,
+                onPickStart: {
+                    routePinTarget = .start
+                    showRouteSheet = false
+                },
+                onPickEnd: {
+                    routePinTarget = .end
+                    showRouteSheet = false
+                },
                 onImportGPX: {
                     showRouteSheet = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -148,6 +170,8 @@ struct MapHomeView: View {
                 onExportGPX: exportGPX,
                 onUseDrawn: {
                     routeCoords = RouteBuilder.sample(coordinates: drawnPath, every: 10)
+                    routeOptions.removeAll()
+                    selectedRouteID = nil
                     drawnPath.removeAll()
                     drawMode = false
                 },
@@ -159,12 +183,34 @@ struct MapHomeView: View {
 
     private func placePin(at point: CGPoint, proxy: MapProxy) {
         guard let coord = proxy.convert(point, from: .local) else { return }
+        if let routePinTarget {
+            setRoutePin(routePinTarget, coordinate: coord)
+            return
+        }
         if drawMode {
             drawnPath.append(coord)
         } else {
             session.pin = coord
             pinPlaceName = nil
             pinSelected = false
+        }
+    }
+
+    private func setRoutePin(_ target: RoutePinTarget, coordinate: CLLocationCoordinate2D) {
+        switch target {
+        case .start:
+            routeStart = coordinate
+        case .end:
+            routeEnd = coordinate
+        }
+        session.pin = coordinate
+        routeOptions.removeAll()
+        selectedRouteID = nil
+        routeCoords.removeAll()
+        routePinTarget = nil
+        pinSelected = false
+        withAnimation(.easeInOut(duration: 0.3)) {
+            position = .region(MKCoordinateRegion(center: coordinate, latitudinalMeters: 1400, longitudinalMeters: 1400))
         }
     }
 
@@ -176,6 +222,10 @@ struct MapHomeView: View {
 
             if !searchText.isEmpty && !search.results.isEmpty {
                 searchResults
+            }
+
+            if let routePinTarget {
+                routePickBanner(routePinTarget)
             }
 
             HStack(alignment: .center, spacing: 10) {
@@ -250,6 +300,26 @@ struct MapHomeView: View {
                 Divider().opacity(0.3)
             }
         }
+        .locusGlass(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func routePickBanner(_ target: RoutePinTarget) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: target == .start ? "smallcircle.filled.circle" : "mappin.circle.fill")
+                .foregroundStyle(target == .start ? .green : .red)
+            Text("Tap the map to set route \(target.title.lowercased())")
+                .font(.subheadline.weight(.semibold))
+            Spacer(minLength: 0)
+            Button("Cancel") {
+                routePinTarget = nil
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(LocusTheme.accent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .locusGlass(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
@@ -370,17 +440,37 @@ struct MapHomeView: View {
         isRouting = true
         Task {
             do {
-                let coords = try await RouteBuilder.roadRoute(from: start, to: end, mode: session.travelMode)
+                let options = try await RouteBuilder.roadRouteOptions(from: start, to: end, mode: session.travelMode)
                 await MainActor.run {
-                    routeCoords = coords
+                    routeOptions = options
+                    selectedRouteID = options.first?.id
+                    routeCoords = options.first?.coordinates ?? []
+                    if !routeCoords.isEmpty {
+                        position = .region(previewRegion(for: routeCoords))
+                    }
                     isRouting = false
                 }
             } catch {
                 await MainActor.run {
+                    let fallback = RouteBuilder.directRouteOption(from: start, to: end, mode: session.travelMode)
+                    routeOptions = [fallback]
+                    selectedRouteID = fallback.id
+                    routeCoords = fallback.coordinates
+                    if !routeCoords.isEmpty {
+                        position = .region(previewRegion(for: routeCoords))
+                    }
                     isRouting = false
-                    session.lastError = error.localizedDescription
+                    session.lastError = "Apple Maps could not find a road route, so Locus created a direct route. Import a GPX file for exact roads."
                 }
             }
+        }
+    }
+
+    private func selectRoute(_ option: RoadRouteOption) {
+        selectedRouteID = option.id
+        routeCoords = option.coordinates
+        if !option.coordinates.isEmpty {
+            position = .region(previewRegion(for: option.coordinates))
         }
     }
 
@@ -399,6 +489,8 @@ struct MapHomeView: View {
             let storedURL = try GPXRouteFile.importFile(from: url)
             let coords = try GPXCodec.parse(storedURL)
             routeCoords = RouteBuilder.sample(coordinates: coords, every: 10)
+            routeOptions.removeAll()
+            selectedRouteID = nil
             if let first = coords.first {
                 session.pin = first
                 position = .region(MKCoordinateRegion(center: first, latitudinalMeters: 2000, longitudinalMeters: 2000))
@@ -420,6 +512,8 @@ struct MapHomeView: View {
                 return
             }
             routeCoords = path
+            routeOptions.removeAll()
+            selectedRouteID = nil
             session.pin = path[0]
             showRouteSheet = false
 
@@ -469,6 +563,18 @@ struct MapHomeView: View {
             }
         } catch {
             session.lastError = error.localizedDescription
+        }
+    }
+}
+
+private enum RoutePinTarget {
+    case start
+    case end
+
+    var title: String {
+        switch self {
+        case .start: return "Start"
+        case .end: return "End"
         }
     }
 }
